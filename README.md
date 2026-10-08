@@ -12,9 +12,25 @@ curl -fsSL https://raw.githubusercontent.com/guiavicar/despertador/main/install-
 Isso deixa o site sempre ligado (inclusive depois de reiniciar) e verifica atualizações no GitHub a cada 5 minutos.
 Logs em `~/despertador/logs/`.
 
+## Instalar no Linux (uma vez, sem sudo)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/guiavicar/despertador/main/install-linux.sh | bash
+```
+
+Usa serviços do systemd do usuário (`despertador.service` e `despertador-update.timer`).
+Ver o log: `journalctl --user -u despertador -f`.
+
 ## Rodar manualmente
 
 Dois cliques em `iniciar.command` (Mac) ou `./iniciar.command`. Abra `http://IP-DO-COMPUTADOR:8000`.
+
+## Desinstalar do Linux
+
+```bash
+systemctl --user disable --now despertador.service despertador-update.timer
+rm ~/.config/systemd/user/despertador*; rm -rf ~/despertador
+```
 
 ## Desinstalar do Mac
 

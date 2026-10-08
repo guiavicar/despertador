@@ -6,5 +6,9 @@ git fetch -q origin main || exit 0
 OLD_REQ=$(git rev-parse HEAD:requirements.txt 2>/dev/null)
 git reset -q --hard origin/main
 echo "$(date '+%F %T') atualizado para $(git log -1 --format='%h %s')"
-[ "$OLD_REQ" != "$(git rev-parse HEAD:requirements.txt)" ] && .venv/bin/pip install -q -r requirements.txt
-launchctl kickstart -k "gui/$(id -u)/com.despertador.server"
+if [ "$OLD_REQ" != "$(git rev-parse HEAD:requirements.txt)" ]; then
+  if command -v uv >/dev/null; then uv pip install -q --python .venv/bin/python -r requirements.txt
+  else .venv/bin/pip install -q -r requirements.txt; fi
+fi
+if [ "$(uname)" = "Darwin" ]; then launchctl kickstart -k "gui/$(id -u)/com.despertador.server"
+else systemctl --user restart despertador.service; fi
