@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import re
+import datetime
 import time
 import urllib.request
 import xml.etree.ElementTree as ET
@@ -23,6 +24,8 @@ VOICES = {"pt-BR-FranciscaNeural", "pt-BR-AntonioNeural", "pt-BR-ThalitaMultilin
 NEWS_URL = "https://news.google.com/rss?hl=pt-BR&gl=BR&ceid=BR:pt-419"
 NEWS_COUNT = 5
 STARTED = str(int(time.time()))  # muda a cada reinício (ou seja, a cada atualização)
+# Agenda do Notion: banco "✅ task" (THE PURSUIT). A chave fica em .env (fora do Git): NOTION_TOKEN=ntn_...
+NOTION_DATA_SOURCE = "db75f277-731f-42be-a8c4-4037b8c8a40b"
 os.makedirs(CACHE, exist_ok=True)
 
 
@@ -60,6 +63,74 @@ def news_text():
     return text
 
 
+def notion_token():
+    if os.environ.get("NOTION_TOKEN"):
+        return os.environ["NOTION_TOKEN"]
+    try:
+        with open(os.path.join(ROOT, ".env")) as f:
+            for line in f:
+                k, _, v = line.strip().partition("=")
+                if k == "NOTION_TOKEN":
+                    return v.strip().strip('"')
+    except FileNotFoundError:
+        pass
+    return None
+
+
+def notion_query(token, filt):
+    req = urllib.request.Request(
+        f"https://api.notion.com/v1/data_sources/{NOTION_DATA_SOURCE}/query",
+        data=json.dumps({"filter": filt, "page_size": 100}).encode(),
+        headers={"Authorization": f"Bearer {token}", "Notion-Version": "2025-09-03",
+                 "Content-Type": "application/json"},
+        method="POST")
+    with urllib.request.urlopen(req, timeout=15) as r:
+        return json.load(r)["results"]
+
+
+def task_info(page):
+    props = page["properties"]
+    title = "".join(t["plain_text"] for t in props["Name"]["title"]).strip() or "sem nome"
+    start = ((props["Data"].get("date") or {}).get("start")) or ""
+    hour = start[11:16] if len(start) > 10 else ""  # "2026-10-08T14:30:00..." -> "14:30"
+    prio = ((props.get("Prioridade") or {}).get("select") or {}).get("name", "")
+    return hour, title, prio
+
+
+def agenda_text():
+    """Compromissos de hoje (não concluídos) + quantas tarefas estão atrasadas. Consulta o Notion na hora."""
+    token = notion_token()
+    if not token:
+        raise RuntimeError("Falta a chave do Notion (NOTION_TOKEN no arquivo .env)")
+    today = datetime.date.today()
+    tomorrow = today + datetime.timedelta(days=1)
+    pending = {"property": "check", "checkbox": {"equals": False}}
+    todays = notion_query(token, {"and": [
+        pending,
+        {"property": "Data", "date": {"on_or_after": today.isoformat()}},
+        {"property": "Data", "date": {"before": tomorrow.isoformat()}}]})
+    late = notion_query(token, {"and": [pending, {"property": "Data", "date": {"before": today.isoformat()}}]})
+
+    items = sorted(task_info(p) for p in todays)  # com horário primeiro, em ordem
+    items.sort(key=lambda i: (i[0] == "", i[0]))
+    if not items:
+        text = "Você não tem compromissos marcados para hoje na sua agenda."
+    else:
+        n = len(items)
+        parts = []
+        for hour, title, prio in items:
+            h, _, m = hour.partition(":")
+            when = f"às {int(h)} horas{' e ' + str(int(m)) if m and int(m) else ''}, " if hour else ""
+            urgent = ", prioridade alta" if prio in ("ALTA", "MÁXIMA") else ""
+            parts.append(f"{when}{title}{urgent}.")
+        text = (f"Você tem {n} compromisso{'s' if n > 1 else ''} hoje. " if n > 1
+                else "Você tem um compromisso hoje. ") + " ".join(parts)
+    if late:
+        text += (f" E ainda há {len(late)} tarefa{'s' if len(late) > 1 else ''} atrasada{'s' if len(late) > 1 else ''} "
+                 "sem concluir na sua lista.")
+    return text
+
+
 class Handler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=ROOT, **kwargs)
@@ -73,9 +144,9 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             return self.wfile.write(body)
-        if url.path == "/news":
+        if url.path in ("/news", "/agenda"):
             try:
-                body = json.dumps({"text": news_text()}).encode()
+                body = json.dumps({"text": news_text() if url.path == "/news" else agenda_text()}).encode()
             except Exception as e:
                 return self.send_error(502, str(e))
             self.send_response(200)

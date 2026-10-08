@@ -2,3 +2,5 @@
 cache/
 logs/
 __pycache__/
+.env
+.claude/

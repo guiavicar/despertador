@@ -80,6 +80,7 @@
   <input type="time" id="newTime">
   <input type="text" id="newMsg" placeholder="Mensagem que será falada (ex: Hora de acordar!)">
   <div class="days" id="newDays"></div>
+  <div class="days"><button id="newAgenda">📅 Ler minha agenda do Notion depois de parar</button></div>
   <div class="days"><button id="newNews">📰 Ler as notícias do dia depois de parar</button></div>
   <button class="primary" id="addBtn">Adicionar</button>
   <button id="cancelBtn" style="display:none">Cancelar</button>
@@ -95,6 +96,7 @@
   <h2>Voz</h2>
   <select id="voice"></select>
   <button id="testBtn">Testar voz</button>
+  <button id="agendaNowBtn">📅 Ouvir agenda agora</button>
   <button id="newsNowBtn">📰 Ouvir notícias agora</button>
   <p class="hint" id="voiceHint">Mantenha esta aba aberta e a tela ligada.</p>
 </div>
@@ -113,9 +115,9 @@
 </div></div>
 
 <div class="overlay" id="newsView"><div class="center">
-  <div style="font-size:5vw;margin-bottom:12px">📰 Notícias do dia</div>
+  <div style="font-size:5vw;margin-bottom:12px" id="newsTitle">📰 Notícias do dia</div>
   <p class="hint" id="newsStatus" style="font-size:18px;margin-bottom:28px"></p>
-  <button class="danger" id="newsStopBtn">Parar notícias</button>
+  <button class="danger" id="newsStopBtn">Parar leitura</button>
 </div></div>
 
 <script>
@@ -209,6 +211,7 @@ function alarmItem(a) {
   li.className = a.on ? "" : "off";
   var rep = a.snooze ? "Soneca" : a.days.length === 7 ? "Todos os dias"
     : a.days.length ? a.days.slice().sort().map(function (d) { return DAYS[d]; }).join(", ") : "Uma vez";
+  if (a.agenda) rep += " · 📅 agenda";
   if (a.news) rep += " · 📰 notícias";
   li.innerHTML = '<div class="t">' + a.time + '</div>' +
     '<div class="info"><div class="msg"></div><div class="rep">' + rep + ' · <span style="color:#4fd1a5">editar</span></div></div>' +
@@ -227,7 +230,7 @@ function alarmItem(a) {
 }
 
 // dias da semana como botões (checkbox escondido não funciona em iPad antigo)
-var selDays = [], newsOn = false, editingId = null;
+var selDays = [], newsOn = false, agendaOn = false, editingId = null;
 (function () {
   for (var i = 0; i < 7; i++) (function (i) {
     var b = document.createElement("button");
@@ -247,6 +250,8 @@ function setDays(days) {
 }
 function setNews(on) { newsOn = on; $("newNews").className = on ? "sel" : ""; }
 $("newNews").onclick = function () { setNews(!newsOn); };
+function setAgenda(on) { agendaOn = on; $("newAgenda").className = on ? "sel" : ""; }
+$("newAgenda").onclick = function () { setAgenda(!agendaOn); };
 
 function startEdit(a) {
   editingId = a.id;
@@ -254,6 +259,7 @@ function startEdit(a) {
   $("newMsg").value = a.msg;
   setDays(a.days);
   setNews(!!a.news);
+  setAgenda(!!a.agenda);
   $("formTitle").innerHTML = "Editar despertador das " + a.time;
   $("addBtn").innerHTML = "Salvar";
   $("cancelBtn").style.display = "";
@@ -264,7 +270,7 @@ function startEdit(a) {
 function resetForm() {
   editingId = null;
   $("newTime").value = ""; $("newMsg").value = "";
-  setDays([]); setNews(false);
+  setDays([]); setNews(false); setAgenda(false);
   $("formTitle").innerHTML = "Novo despertador";
   $("addBtn").innerHTML = "Adicionar";
   $("cancelBtn").style.display = "none";
@@ -281,6 +287,7 @@ $("addBtn").onclick = function () {
   a.msg = $("newMsg").value.replace(/^\s+|\s+$/g, "");
   a.days = selDays.slice();
   a.news = newsOn;
+  a.agenda = agendaOn;
   a.on = true;
   delete a.snooze;
   save(STORE, alarms);
@@ -369,7 +376,9 @@ function startRing(a) {
   $("ringMsg").textContent = a.msg || "Despertador";
   $("ring").className = "overlay show";
   var phrase = phraseFor(a);
-  if (a.news) fetchNews(function (text) { prefetch(text); });   // já vai gerando o áudio enquanto toca
+  // já vai gerando o áudio enquanto toca
+  if (a.agenda) fetchText("/agenda", function (text) { if (text) prefetch(text); });
+  if (a.news) fetchText("/news", function (text) { if (text) prefetch(text); });
   // ciclo: bipes por ~4s, depois fala a mensagem, e repete até parar
   function cycle() {
     if (ringing !== a) return;
@@ -401,21 +410,21 @@ function stopRing() {
 $("stopBtn").onclick = function () {
   var a = ringing;
   stopRing();
-  if (a && a.news) readNews();
+  if (a) readBriefing(a.agenda, a.news);
 };
 $("snoozeBtn").onclick = function () {
   var a = ringing, t = new Date(new Date().getTime() + 5 * 60000);
   alarms.push({ id: "s" + new Date().getTime().toString(36), time: pad(t.getHours()) + ":" + pad(t.getMinutes()),
-    msg: a.msg, news: a.news, days: [], on: true, snooze: true });
+    msg: a.msg, news: a.news, agenda: a.agenda, days: [], on: true, snooze: true });
   save(STORE, alarms);
   stopRing();
 };
 
-// ---------- notícias (manchetes do Google Notícias, buscadas pelo server.py) ----------
-var newsReading = 0;
-function fetchNews(cb) {
+// ---------- agenda do Notion e notícias (buscadas pelo server.py na hora) ----------
+var briefingId = 0;
+function fetchText(path, cb) {
   var x = new XMLHttpRequest();
-  x.open("GET", "/news");
+  x.open("GET", path + "?" + new Date().getTime());
   x.onload = function () {
     var text = null;
     try { text = x.status === 200 ? JSON.parse(x.responseText).text : null; } catch (e) {}
@@ -425,25 +434,38 @@ function fetchNews(cb) {
   x.send();
 }
 
-function readNews() {
-  var id = ++newsReading;
+// lê a agenda e/ou as notícias, uma depois da outra
+function readBriefing(agenda, news) {
+  var steps = [];
+  if (agenda) steps.push({ path: "/agenda", title: "📅 Sua agenda de hoje", fail: "Não consegui ler sua agenda do Notion." });
+  if (news) steps.push({ path: "/news", title: "📰 Notícias do dia", fail: "Não consegui buscar as notícias." });
+  if (!steps.length) return;
+  var id = ++briefingId;
   $("newsView").className = "overlay show";
-  $("newsStatus").innerHTML = "Buscando as manchetes…";
-  fetchNews(function (text) {
-    if (id !== newsReading) return;
-    if (!text) { $("newsStatus").innerHTML = "Não consegui buscar as notícias (sem internet ou servidor desligado)."; return; }
-    $("newsStatus").innerHTML = "Lendo…";
-    speak(text, closeNews);
-  });
+  function next() {
+    if (id !== briefingId) return;
+    var st = steps.shift();
+    if (!st) return closeBriefing();
+    $("newsTitle").innerHTML = st.title;
+    $("newsStatus").innerHTML = "Buscando…";
+    fetchText(st.path, function (text) {
+      if (id !== briefingId) return;
+      if (!text) { $("newsStatus").innerHTML = st.fail; return setTimeout(next, 3000); }
+      $("newsStatus").innerHTML = "Lendo…";
+      speak(text, next);
+    });
+  }
+  next();
 }
 
-function closeNews() {
-  newsReading++;
+function closeBriefing() {
+  briefingId++;
   silence();
   $("newsView").className = "overlay";
 }
-$("newsStopBtn").onclick = closeNews;
-$("newsNowBtn").onclick = readNews;
+$("newsStopBtn").onclick = closeBriefing;
+$("newsNowBtn").onclick = function () { readBriefing(false, true); };
+$("agendaNowBtn").onclick = function () { readBriefing(true, false); };
 
 // ---------- desbloqueio (exigência dos navegadores) + tela ligada ----------
 function silentWav() {
