@@ -69,6 +69,8 @@
 </head>
 <body>
 
+<div id="updateBar" style="display:none;background:#4fd1a5;color:#062a1e;padding:12px;border-radius:12px;margin-bottom:12px;cursor:pointer">
+  Nova versão disponível. Toque aqui para atualizar.</div>
 <div id="clock">--:--<span class="sec">--</span></div>
 <div id="date"></div>
 <div id="next"></div>
@@ -471,6 +473,23 @@ $("unlockBtn").onclick = function () {
   keepAwake();
   $("unlock").className = "overlay";
 };
+
+// ---------- aviso de nova versão (o iMac se atualiza sozinho pelo GitHub) ----------
+// Não recarrega sozinho: recarregar exigiria tocar em "Ativar" de novo para o som funcionar.
+var serverVersion = null;
+function checkVersion() {
+  var x = new XMLHttpRequest();
+  x.open("GET", "/version?" + new Date().getTime());
+  x.onload = function () {
+    if (x.status !== 200) return;
+    if (serverVersion === null) serverVersion = x.responseText;
+    else if (x.responseText !== serverVersion) $("updateBar").style.display = "block";
+  };
+  x.send();
+}
+$("updateBar").onclick = function () { location.reload(); };
+checkVersion();
+setInterval(checkVersion, 5 * 60000);
 
 render();
 tick();

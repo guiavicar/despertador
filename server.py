@@ -22,6 +22,7 @@ PORT = int(os.environ.get("PORT", "8000"))
 VOICES = {"pt-BR-FranciscaNeural", "pt-BR-AntonioNeural", "pt-BR-ThalitaMultilingualNeural"}
 NEWS_URL = "https://news.google.com/rss?hl=pt-BR&gl=BR&ceid=BR:pt-419"
 NEWS_COUNT = 5
+STARTED = str(int(time.time()))  # muda a cada reinício (ou seja, a cada atualização)
 os.makedirs(CACHE, exist_ok=True)
 
 
@@ -65,6 +66,13 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         url = urlparse(self.path)
+        if url.path == "/version":
+            body = STARTED.encode()
+            self.send_response(200)
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            return self.wfile.write(body)
         if url.path == "/news":
             try:
                 body = json.dumps({"text": news_text()}).encode()
