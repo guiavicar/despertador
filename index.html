@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<title>Relógio Despertador</title>
+<!-- Escrito em CSS/JS "antigos" de propósito, para funcionar em iPads velhos (iOS 9+). -->
+<style>
+  * { box-sizing: border-box; -webkit-box-sizing: border-box; }
+  html, body { margin: 0; background: #0e1116; color: #e9edf2;
+    font-family: -apple-system, "Helvetica Neue", Helvetica, Arial, sans-serif; }
+  body { padding: 16px; text-align: center; }
+  button, input, select { font: inherit; color: inherit; -webkit-appearance: none; }
+  button { cursor: pointer; border: 0; border-radius: 12px; padding: 12px 18px; background: #2a313c; margin: 4px; }
+  button.primary { background: #4fd1a5; color: #062a1e; font-weight: 600; }
+  button.danger { background: #ff6b6b; color: #2b0606; font-weight: 600; }
+
+  #clock { font-size: 20vw; font-weight: 200; line-height: 1; margin-top: 4vh; }
+  #clock .sec { font-size: 0.35em; color: #8b95a3; margin-left: 0.15em; }
+  #date { font-size: 3.5vw; color: #8b95a3; margin: 12px 0 4vh; }
+  #next { color: #4fd1a5; min-height: 1.4em; margin-bottom: 24px; }
+  @media (min-width: 1100px) { #clock { font-size: 220px; } #date { font-size: 30px; } }
+  @media (max-width: 520px) { #date { font-size: 18px; } }
+
+  .panel { max-width: 640px; margin: 0 auto 16px; background: #181d25; border: 1px solid #2a313c;
+    border-radius: 18px; padding: 18px; text-align: left; }
+  .panel h2 { margin: 0 0 14px; font-size: 18px; font-weight: 600; }
+  input[type=time], input[type=text], select { background: #0e1116; border: 1px solid #2a313c;
+    border-radius: 10px; padding: 10px 12px; margin: 4px; }
+  input[type=time] { font-size: 22px; }
+  input[type=text], select { width: 100%; margin: 4px 0; }
+  .days { margin: 10px 0; }
+  .days button { padding: 10px 12px; background: transparent; border: 1px solid #2a313c; color: #8b95a3; margin: 3px; }
+  .days button.sel { background: #4fd1a5; border-color: #4fd1a5; color: #062a1e; }
+  .hint { color: #8b95a3; font-size: 13px; }
+
+  #list { list-style: none; padding: 0; margin: 0; }
+  #list li { display: table; width: 100%; padding: 12px 0; border-top: 1px solid #2a313c; }
+  #list li:first-child { border-top: 0; }
+  #list li > * { display: table-cell; vertical-align: middle; }
+  #list .t { font-size: 32px; width: 100px; }
+  #list .msg { word-wrap: break-word; }
+  #list .rep { color: #8b95a3; font-size: 13px; }
+  #list li.off .t, #list li.off .info { opacity: 0.4; }
+  #list .actions { width: 120px; text-align: right; white-space: nowrap; }
+  .switch { width: 52px; height: 30px; border-radius: 15px; padding: 0; background: #2a313c; position: relative; vertical-align: middle; }
+  .switch:after { content: ""; position: absolute; top: 3px; left: 3px; width: 24px; height: 24px; border-radius: 50%; background: #fff; }
+  .switch.on { background: #4fd1a5; }
+  .switch.on:after { left: 25px; }
+  .del { background: transparent; color: #8b95a3; padding: 8px; vertical-align: middle; }
+  .empty { color: #8b95a3; }
+
+  /* tela cheia centralizada sem flexbox moderno */
+  .overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; width: 100%; height: 100%;
+    background: #080a0e; display: none; z-index: 10; padding: 24px; }
+  .overlay.show { display: block; }
+  .overlay .center { position: absolute; top: 50%; left: 0; right: 0; padding: 0 24px;
+    -webkit-transform: translateY(-50%); transform: translateY(-50%); text-align: center; }
+  #ringTime { font-size: 18vw; font-weight: 200; }
+  #ringMsg { font-size: 5vw; margin: 16px 0 36px; word-wrap: break-word; }
+  .overlay button { font-size: 22px; padding: 18px 32px; }
+  #unlock h1 { font-weight: 300; }
+  #ring.show #ringTime { -webkit-animation: pulse 1s ease-in-out infinite; animation: pulse 1s ease-in-out infinite; }
+  @-webkit-keyframes pulse { 50% { opacity: .5; } }
+  @keyframes pulse { 50% { opacity: .5; } }
+</style>
+</head>
+<body>
+
+<div id="clock">--:--<span class="sec">--</span></div>
+<div id="date"></div>
+<div id="next"></div>
+
+<div class="panel" id="form">
+  <h2 id="formTitle">Novo despertador</h2>
+  <input type="time" id="newTime">
+  <input type="text" id="newMsg" placeholder="Mensagem que será falada (ex: Hora de acordar!)">
+  <div class="days" id="newDays"></div>
+  <div class="days"><button id="newNews">📰 Ler as notícias do dia depois de parar</button></div>
+  <button class="primary" id="addBtn">Adicionar</button>
+  <button id="cancelBtn" style="display:none">Cancelar</button>
+  <span class="hint">Sem dias marcados = toca só uma vez.</span>
+</div>
+
+<div class="panel">
+  <h2>Despertadores</h2>
+  <ul id="list"></ul>
+</div>
+
+<div class="panel">
+  <h2>Voz</h2>
+  <select id="voice"></select>
+  <button id="testBtn">Testar voz</button>
+  <button id="newsNowBtn">📰 Ouvir notícias agora</button>
+  <p class="hint" id="voiceHint">Mantenha esta aba aberta e a tela ligada.</p>
+</div>
+
+<div class="overlay show" id="unlock"><div class="center">
+  <h1>Relógio Despertador</h1>
+  <p class="hint" style="font-size:16px;margin-bottom:28px">Toque para ativar o som e a voz</p>
+  <button class="primary" id="unlockBtn" style="font-size:22px;padding:18px 36px">Ativar</button>
+</div></div>
+
+<div class="overlay" id="ring"><div class="center">
+  <div id="ringTime"></div>
+  <div id="ringMsg"></div>
+  <button id="snoozeBtn">Soneca 5 min</button>
+  <button class="danger" id="stopBtn">Parar</button>
+</div></div>
+
+<div class="overlay" id="newsView"><div class="center">
+  <div style="font-size:5vw;margin-bottom:12px">📰 Notícias do dia</div>
+  <p class="hint" id="newsStatus" style="font-size:18px;margin-bottom:28px"></p>
+  <button class="danger" id="newsStopBtn">Parar notícias</button>
+</div></div>
+
+<script>
+var DAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+var DAYS_LONG = ["domingo", "segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado"];
+var MONTHS = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+// Vozes neurais geradas pelo server.py (soam naturais). As do aparelho entram depois como alternativa.
+var NEURAL = [
+  { id: "pt-BR-FranciscaNeural", name: "Francisca (natural)" },
+  { id: "pt-BR-ThalitaMultilingualNeural", name: "Thalita (natural)" },
+  { id: "pt-BR-AntonioNeural", name: "Antônio (natural)" }
+];
+var STORE = "despertador.alarms";
+function $(id) { return document.getElementById(id); }
+function pad(n) { return n < 10 ? "0" + n : "" + n; }
+function has(arr, x) { return arr.indexOf(x) !== -1; }
+
+// ---------- estado ----------
+function load(k, fallback) { try { var v = JSON.parse(localStorage.getItem(k)); return v == null ? fallback : v; } catch (e) { return fallback; } }
+function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+var alarms = load(STORE, []);
+var lastFired = {};
+var ringing = null;
+
+// ---------- relógio ----------
+function tick() {
+  var now = new Date();
+  $("clock").innerHTML = pad(now.getHours()) + ":" + pad(now.getMinutes()) + '<span class="sec">' + pad(now.getSeconds()) + "</span>";
+  var d = DAYS_LONG[now.getDay()];
+  $("date").innerHTML = d.charAt(0).toUpperCase() + d.slice(1) + ", " + now.getDate() + " de " + MONTHS[now.getMonth()] + " de " + now.getFullYear();
+  checkAlarms(now);
+  if (now.getSeconds() === 0) renderNext();
+}
+
+// ---------- despertadores ----------
+function phraseFor(a) {
+  var p = a.time.split(":"), h = +p[0], m = +p[1];
+  return "São " + h + (h === 1 ? " hora" : " horas") + (m ? " e " + m + " minutos" : "") + ". " + (a.msg || "");
+}
+
+function checkAlarms(now) {
+  if (ringing) return;
+  var hhmm = pad(now.getHours()) + ":" + pad(now.getMinutes());
+  var stamp = now.toDateString() + " " + hhmm;
+  for (var i = 0; i < alarms.length; i++) {
+    var a = alarms[i];
+    if (!a.on || a.time !== hhmm || lastFired[a.id] === stamp) continue;
+    if (a.days.length && !has(a.days, now.getDay())) continue;
+    lastFired[a.id] = stamp;
+    if (a.snooze) alarms.splice(i, 1);          // soneca é descartável
+    else if (!a.days.length) a.on = false;      // único: desliga depois de tocar
+    save(STORE, alarms); render();
+    startRing(a);
+    return;
+  }
+}
+
+function nextOccurrence(a, from) {
+  var p = a.time.split(":");
+  for (var i = 0; i < 8; i++) {
+    var d = new Date(from.getTime()); d.setDate(d.getDate() + i); d.setHours(+p[0], +p[1], 0, 0);
+    if (d <= from) continue;
+    if (!a.days.length || has(a.days, d.getDay())) return d;
+  }
+  return null;
+}
+
+function renderNext() {
+  var now = new Date(), best = null;
+  for (var i = 0; i < alarms.length; i++) {
+    if (!alarms[i].on) continue;
+    var d = nextOccurrence(alarms[i], now);
+    if (d && (!best || d < best)) best = d;
+  }
+  if (!best) { $("next").innerHTML = ""; return; }
+  var mins = Math.round((best - now) / 60000), h = Math.floor(mins / 60), m = mins % 60;
+  $("next").innerHTML = "Próximo despertador em " + (h ? h + " h " : "") + m + " min";
+}
+
+function render() {
+  var list = $("list");
+  list.innerHTML = "";
+  var sorted = alarms.slice().sort(function (a, b) { return a.time < b.time ? -1 : a.time > b.time ? 1 : 0; });
+  if (!sorted.length) list.innerHTML = '<li class="empty">Nenhum despertador ainda.</li>';
+  for (var i = 0; i < sorted.length; i++) list.appendChild(alarmItem(sorted[i]));
+  renderNext();
+}
+
+function alarmItem(a) {
+  var li = document.createElement("li");
+  li.className = a.on ? "" : "off";
+  var rep = a.snooze ? "Soneca" : a.days.length === 7 ? "Todos os dias"
+    : a.days.length ? a.days.slice().sort().map(function (d) { return DAYS[d]; }).join(", ") : "Uma vez";
+  if (a.news) rep += " · 📰 notícias";
+  li.innerHTML = '<div class="t">' + a.time + '</div>' +
+    '<div class="info"><div class="msg"></div><div class="rep">' + rep + ' · <span style="color:#4fd1a5">editar</span></div></div>' +
+    '<div class="actions"><button class="switch' + (a.on ? " on" : "") + '"></button><button class="del">✕</button></div>';
+  if (editingId === a.id) li.style.background = "#222a35";
+  li.querySelector(".msg").textContent = a.msg || "(sem mensagem)";
+  li.querySelector(".t").onclick = li.querySelector(".info").onclick = function () { startEdit(a); };
+  li.querySelector(".switch").onclick = function () { a.on = !a.on; save(STORE, alarms); render(); };
+  li.querySelector(".del").onclick = function () {
+    if (!confirm("Excluir o despertador das " + a.time + "?")) return;
+    alarms.splice(alarms.indexOf(a), 1);
+    if (editingId === a.id) resetForm();
+    save(STORE, alarms); render();
+  };
+  return li;
+}
+
+// dias da semana como botões (checkbox escondido não funciona em iPad antigo)
+var selDays = [], newsOn = false, editingId = null;
+(function () {
+  for (var i = 0; i < 7; i++) (function (i) {
+    var b = document.createElement("button");
+    b.innerHTML = DAYS[i];
+    b.onclick = function () {
+      var k = selDays.indexOf(i);
+      if (k === -1) selDays.push(i); else selDays.splice(k, 1);
+      setDays(selDays);
+    };
+    $("newDays").appendChild(b);
+  })(i);
+})();
+function setDays(days) {
+  selDays = days.slice();
+  var bs = $("newDays").getElementsByTagName("button");
+  for (var i = 0; i < bs.length; i++) bs[i].className = has(selDays, i) ? "sel" : "";
+}
+function setNews(on) { newsOn = on; $("newNews").className = on ? "sel" : ""; }
+$("newNews").onclick = function () { setNews(!newsOn); };
+
+function startEdit(a) {
+  editingId = a.id;
+  $("newTime").value = a.time;
+  $("newMsg").value = a.msg;
+  setDays(a.days);
+  setNews(!!a.news);
+  $("formTitle").innerHTML = "Editar despertador das " + a.time;
+  $("addBtn").innerHTML = "Salvar";
+  $("cancelBtn").style.display = "";
+  render();
+  window.scrollTo(0, $("form").offsetTop - 10);
+}
+
+function resetForm() {
+  editingId = null;
+  $("newTime").value = ""; $("newMsg").value = "";
+  setDays([]); setNews(false);
+  $("formTitle").innerHTML = "Novo despertador";
+  $("addBtn").innerHTML = "Adicionar";
+  $("cancelBtn").style.display = "none";
+}
+$("cancelBtn").onclick = function () { resetForm(); render(); };
+
+$("addBtn").onclick = function () {
+  var time = $("newTime").value;
+  if (!time) { $("newTime").focus(); return; }
+  var a = null;
+  for (var i = 0; i < alarms.length; i++) if (alarms[i].id === editingId) a = alarms[i];
+  if (!a) { a = { id: new Date().getTime().toString(36) }; alarms.push(a); }
+  a.time = time.slice(0, 5);
+  a.msg = $("newMsg").value.replace(/^\s+|\s+$/g, "");
+  a.days = selDays.slice();
+  a.news = newsOn;
+  a.on = true;
+  delete a.snooze;
+  save(STORE, alarms);
+  prefetch(phraseFor(a));
+  resetForm();
+  render();
+};
+
+// ---------- bipes (gerados pelo navegador) ----------
+var audioCtx = null, beepTimer = null;
+function beepOnce() {
+  if (!audioCtx) return;
+  var t = audioCtx.currentTime;
+  for (var i = 0; i < 4; i++) {
+    var o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = "square"; o.frequency.value = 880;
+    g.gain.setValueAtTime(0, t + i * 0.18);
+    g.gain.linearRampToValueAtTime(0.25, t + i * 0.18 + 0.01);
+    g.gain.linearRampToValueAtTime(0, t + i * 0.18 + 0.12);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(t + i * 0.18); o.stop(t + i * 0.18 + 0.13);
+  }
+}
+
+// ---------- voz ----------
+var player = new Audio();
+var devVoices = [];
+function ttsUrl(text, voice) { return "/tts?voice=" + encodeURIComponent(voice) + "&text=" + encodeURIComponent(text); }
+function prefetch(text) {
+  var v = $("voice").value;
+  if (v.indexOf("n:") !== 0) return;
+  var x = new XMLHttpRequest(); x.open("GET", ttsUrl(text, v.slice(2))); x.send();
+}
+
+function loadVoices() {
+  var all = window.speechSynthesis ? speechSynthesis.getVoices() : [];
+  devVoices = [];
+  for (var i = 0; i < all.length; i++) if (/^pt/i.test(all[i].lang)) devVoices.push(all[i]);
+  var html = "";
+  for (i = 0; i < NEURAL.length; i++) html += '<option value="n:' + NEURAL[i].id + '">' + NEURAL[i].name + "</option>";
+  for (i = 0; i < devVoices.length; i++) html += '<option value="d:' + i + '">Do aparelho: ' + devVoices[i].name + "</option>";
+  if (window.speechSynthesis && !devVoices.length) html += '<option value="d:">Do aparelho: voz padrão</option>';
+  var sel = $("voice"), saved = load("despertador.voice", "n:" + NEURAL[0].id);
+  sel.innerHTML = html;
+  sel.value = saved;
+  if (sel.value !== saved) sel.selectedIndex = 0;
+}
+loadVoices();
+if (window.speechSynthesis) speechSynthesis.onvoiceschanged = loadVoices;
+$("voice").onchange = function () { save("despertador.voice", $("voice").value); };
+
+function deviceSpeak(text, onEnd) {
+  if (!window.speechSynthesis) { if (onEnd) onEnd(); return; }
+  speechSynthesis.cancel();
+  var u = new SpeechSynthesisUtterance(text);
+  var v = devVoices[+$("voice").value.slice(2)];
+  if (v) { u.voice = v; u.lang = v.lang; } else u.lang = "pt-BR";
+  u.rate = 0.95;
+  var done = false;
+  u.onend = u.onerror = function () { if (!done) { done = true; if (onEnd) onEnd(); } };
+  speechSynthesis.speak(u);
+}
+
+// fala com a voz natural; se o servidor não responder (sem internet etc.), usa a do aparelho
+function speak(text, onEnd) {
+  var v = $("voice").value;
+  if (v.indexOf("n:") !== 0) return deviceSpeak(text, onEnd);
+  var finished = false;
+  function finish() { if (!finished) { finished = true; player.onended = player.onerror = null; if (onEnd) onEnd(); } }
+  player.onended = finish;
+  player.onerror = function () { player.onended = player.onerror = null; $("voiceHint").innerHTML = "Voz natural indisponível (servidor ou internet). Usando a voz do aparelho."; deviceSpeak(text, finish); };
+  player.src = ttsUrl(text, v.slice(2));
+  var p = player.play();
+  if (p && p["catch"]) p["catch"](function () {});
+}
+
+$("testBtn").onclick = function () {
+  var n = new Date();
+  speak("Teste de voz. Agora são " + n.getHours() + " horas e " + n.getMinutes() + " minutos.");
+};
+
+// ---------- tocando ----------
+function startRing(a) {
+  ringing = a;
+  $("ringTime").innerHTML = a.time;
+  $("ringMsg").textContent = a.msg || "Despertador";
+  $("ring").className = "overlay show";
+  var phrase = phraseFor(a);
+  if (a.news) fetchNews(function (text) { prefetch(text); });   // já vai gerando o áudio enquanto toca
+  // ciclo: bipes por ~4s, depois fala a mensagem, e repete até parar
+  function cycle() {
+    if (ringing !== a) return;
+    var n = 0;
+    beepOnce();
+    beepTimer = setInterval(function () {
+      if (++n < 4) return beepOnce();
+      clearInterval(beepTimer);
+      speak(phrase, function () { if (ringing === a) beepTimer = setTimeout(cycle, 1500); });
+    }, 1000);
+  }
+  cycle();
+}
+
+function silence() {
+  clearInterval(beepTimer); clearTimeout(beepTimer);
+  player.onended = player.onerror = null;
+  try { player.pause(); } catch (e) {}
+  if (window.speechSynthesis) speechSynthesis.cancel();
+}
+
+function stopRing() {
+  ringing = null;
+  silence();
+  $("ring").className = "overlay";
+  render();
+}
+
+$("stopBtn").onclick = function () {
+  var a = ringing;
+  stopRing();
+  if (a && a.news) readNews();
+};
+$("snoozeBtn").onclick = function () {
+  var a = ringing, t = new Date(new Date().getTime() + 5 * 60000);
+  alarms.push({ id: "s" + new Date().getTime().toString(36), time: pad(t.getHours()) + ":" + pad(t.getMinutes()),
+    msg: a.msg, news: a.news, days: [], on: true, snooze: true });
+  save(STORE, alarms);
+  stopRing();
+};
+
+// ---------- notícias (manchetes do Google Notícias, buscadas pelo server.py) ----------
+var newsReading = 0;
+function fetchNews(cb) {
+  var x = new XMLHttpRequest();
+  x.open("GET", "/news");
+  x.onload = function () {
+    var text = null;
+    try { text = x.status === 200 ? JSON.parse(x.responseText).text : null; } catch (e) {}
+    cb(text);
+  };
+  x.onerror = function () { cb(null); };
+  x.send();
+}
+
+function readNews() {
+  var id = ++newsReading;
+  $("newsView").className = "overlay show";
+  $("newsStatus").innerHTML = "Buscando as manchetes…";
+  fetchNews(function (text) {
+    if (id !== newsReading) return;
+    if (!text) { $("newsStatus").innerHTML = "Não consegui buscar as notícias (sem internet ou servidor desligado)."; return; }
+    $("newsStatus").innerHTML = "Lendo…";
+    speak(text, closeNews);
+  });
+}
+
+function closeNews() {
+  newsReading++;
+  silence();
+  $("newsView").className = "overlay";
+}
+$("newsStopBtn").onclick = closeNews;
+$("newsNowBtn").onclick = readNews;
+
+// ---------- desbloqueio (exigência dos navegadores) + tela ligada ----------
+function silentWav() {
+  var b = "RIFF\x26\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x40\x1f\0\0\x01\0\x08\0data\x02\0\0\0\x80\x80";
+  return "data:audio/wav;base64," + btoa(b);
+}
+function keepAwake() {
+  try { if (navigator.wakeLock && document.visibilityState === "visible") navigator.wakeLock.request("screen")["catch"](function () {}); } catch (e) {}
+}
+document.addEventListener("visibilitychange", keepAwake);
+
+$("unlockBtn").onclick = function () {
+  var AC = window.AudioContext || window.webkitAudioContext;
+  if (AC) {
+    audioCtx = new AC();
+    // iOS antigo só libera o som tocando algo dentro do toque
+    var src = audioCtx.createBufferSource();
+    src.buffer = audioCtx.createBuffer(1, 1, 22050);
+    src.connect(audioCtx.destination);
+    src.start ? src.start(0) : src.noteOn(0);
+    if (audioCtx.resume) audioCtx.resume();
+  }
+  player.src = silentWav();
+  var p = player.play();
+  if (p && p["catch"]) p["catch"](function () {});
+  if (window.speechSynthesis) { var u = new SpeechSynthesisUtterance(" "); u.volume = 0; speechSynthesis.speak(u); }
+  keepAwake();
+  $("unlock").className = "overlay";
+};
+
+render();
+tick();
+setInterval(tick, 1000);
+</script>
+</body>
+</html>
