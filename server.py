@@ -26,7 +26,7 @@ NEWS_COUNT = 5
 STARTED = str(int(time.time()))  # muda a cada reinício (ou seja, a cada atualização)
 # Agenda do Notion: banco "✅ task" (THE PURSUIT). A chave fica em .env (fora do Git): NOTION_TOKEN=ntn_...
 NOTION_DATA_SOURCE = "db75f277-731f-42be-a8c4-4037b8c8a40b"
-LATE_DAYS = 30
+UPCOMING_COUNT = 3  # quantas próximas tarefas citar
 os.makedirs(CACHE, exist_ok=True)
 
 
@@ -78,10 +78,11 @@ def notion_token():
     return None
 
 
-def notion_query(token, filt):
+def notion_query(token, filt, sorts=None, page_size=100):
     req = urllib.request.Request(
         f"https://api.notion.com/v1/data_sources/{NOTION_DATA_SOURCE}/query",
-        data=json.dumps({"filter": filt, "page_size": 100}).encode(),
+        data=json.dumps({"filter": filt, "page_size": page_size,
+                         **({"sorts": sorts} if sorts else {})}).encode(),
         headers={"Authorization": f"Bearer {token}", "Notion-Version": "2025-09-03",
                  "Content-Type": "application/json"},
         method="POST")
@@ -98,8 +99,29 @@ def task_info(page):
     return hour, title, prio
 
 
+WEEKDAYS = ["segunda-feira", "terça-feira", "quarta-feira", "quinta-feira", "sexta-feira", "sábado", "domingo"]
+MONTHS = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto",
+          "setembro", "outubro", "novembro", "dezembro"]
+
+
+def when_day(day, today):
+    """'amanhã', 'na sexta-feira, dia 16' (até 6 dias) ou 'dia 21 de outubro'."""
+    diff = (day - today).days
+    if diff == 1:
+        return "amanhã"
+    if diff < 7:
+        wd = WEEKDAYS[day.weekday()]
+        return f"{'no' if day.weekday() >= 5 else 'na'} {wd}, dia {day.day}"
+    return f"dia {day.day} de {MONTHS[day.month - 1]}"
+
+
+def spoken_hour(hour):
+    h, _, m = hour.partition(":")
+    return f"{int(h)} horas" + (f" e {int(m)}" if int(m) else "")
+
+
 def agenda_text():
-    """Compromissos de hoje (não concluídos) + quantas tarefas estão atrasadas. Consulta o Notion na hora."""
+    """Compromissos de hoje e os próximos (não concluídos). Consulta o Notion na hora."""
     token = notion_token()
     if not token:
         raise RuntimeError("Falta a chave do Notion (NOTION_TOKEN no arquivo .env)")
@@ -110,11 +132,9 @@ def agenda_text():
         pending,
         {"property": "Data", "date": {"on_or_after": today.isoformat()}},
         {"property": "Data", "date": {"before": tomorrow.isoformat()}}]})
-    # atrasadas: só as dos últimos 30 dias (a lista tem tarefas antigas esquecidas desde 2023)
-    late = notion_query(token, {"and": [
-        pending,
-        {"property": "Data", "date": {"before": today.isoformat()}},
-        {"property": "Data", "date": {"on_or_after": (today - datetime.timedelta(days=LATE_DAYS)).isoformat()}}]})
+    upcoming = notion_query(token, {"and": [
+        pending, {"property": "Data", "date": {"on_or_after": tomorrow.isoformat()}}]},
+        sorts=[{"property": "Data", "direction": "ascending"}], page_size=UPCOMING_COUNT)
 
     items = sorted(task_info(p) for p in todays)  # com horário primeiro, em ordem
     items.sort(key=lambda i: (i[0] == "", i[0]))
@@ -124,20 +144,18 @@ def agenda_text():
         n = len(items)
         parts = []
         for hour, title, prio in items:
-            h, _, m = hour.partition(":")
-            when = f"às {int(h)} horas{' e ' + str(int(m)) if m and int(m) else ''}, " if hour else ""
+            when = f"às {spoken_hour(hour)}, " if hour else ""
             urgent = ", prioridade alta" if prio in ("ALTA", "MÁXIMA") else ""
             parts.append(f"{when}{title}{urgent}.")
         text = (f"Você tem {n} compromisso{'s' if n > 1 else ''} hoje. " if n > 1
                 else "Você tem um compromisso hoje. ") + " ".join(parts)
-    if late:
-        late.sort(key=lambda p: (p["properties"]["Data"].get("date") or {}).get("start", ""), reverse=True)
-        names = [task_info(p)[1] for p in late[:3]]
-        names = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " e " + names[-1]
-        if len(late) == 1:
-            text += f" Ficou pendente do último mês: {names}."
-        else:
-            text += f" Do último mês, {len(late)} tarefas ficaram pendentes, como {names}."
+    if upcoming:
+        nexts = []
+        for p in upcoming:
+            hour, title, _ = task_info(p)
+            day = datetime.date.fromisoformat(p["properties"]["Data"]["date"]["start"][:10])
+            nexts.append(f"{when_day(day, today)}{' às ' + spoken_hour(hour) if hour else ''}, {title}")
+        text += " Próximos compromissos: " + "; ".join(nexts) + "."
     return text
 
 
