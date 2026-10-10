@@ -26,6 +26,7 @@ NEWS_COUNT = 5
 STARTED = str(int(time.time()))  # muda a cada reinício (ou seja, a cada atualização)
 # Agenda do Notion: banco "✅ task" (THE PURSUIT). A chave fica em .env (fora do Git): NOTION_TOKEN=ntn_...
 NOTION_DATA_SOURCE = "db75f277-731f-42be-a8c4-4037b8c8a40b"
+LATE_DAYS = 30
 os.makedirs(CACHE, exist_ok=True)
 
 
@@ -109,7 +110,11 @@ def agenda_text():
         pending,
         {"property": "Data", "date": {"on_or_after": today.isoformat()}},
         {"property": "Data", "date": {"before": tomorrow.isoformat()}}]})
-    late = notion_query(token, {"and": [pending, {"property": "Data", "date": {"before": today.isoformat()}}]})
+    # atrasadas: só as dos últimos 30 dias (a lista tem tarefas antigas esquecidas desde 2023)
+    late = notion_query(token, {"and": [
+        pending,
+        {"property": "Data", "date": {"before": today.isoformat()}},
+        {"property": "Data", "date": {"on_or_after": (today - datetime.timedelta(days=LATE_DAYS)).isoformat()}}]})
 
     items = sorted(task_info(p) for p in todays)  # com horário primeiro, em ordem
     items.sort(key=lambda i: (i[0] == "", i[0]))
@@ -126,8 +131,13 @@ def agenda_text():
         text = (f"Você tem {n} compromisso{'s' if n > 1 else ''} hoje. " if n > 1
                 else "Você tem um compromisso hoje. ") + " ".join(parts)
     if late:
-        text += (f" E ainda há {len(late)} tarefa{'s' if len(late) > 1 else ''} atrasada{'s' if len(late) > 1 else ''} "
-                 "sem concluir na sua lista.")
+        late.sort(key=lambda p: (p["properties"]["Data"].get("date") or {}).get("start", ""), reverse=True)
+        names = [task_info(p)[1] for p in late[:3]]
+        names = names[0] if len(names) == 1 else ", ".join(names[:-1]) + " e " + names[-1]
+        if len(late) == 1:
+            text += f" Ficou pendente do último mês: {names}."
+        else:
+            text += f" Do último mês, {len(late)} tarefas ficaram pendentes, como {names}."
     return text
 
 
